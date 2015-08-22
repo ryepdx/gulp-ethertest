@@ -25,6 +25,7 @@
   },
   "homepage": "https://github.com/ryepdx/gulp-ethertest",
   "dependencies": {
+    "lodash": "^3.10.1",
     "through2": "^2.0.0",
     "web3": "^0.12.2"
   },
