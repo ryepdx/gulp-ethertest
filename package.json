@@ -1,0 +1,30 @@
+{
+  "name": "gulp-ethertest",
+  "version": "0.0.1",
+  "description": "Incorporate Ethereum test contracts into your Gulp workflow.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ryepdx/gulp-ethertest.git"
+  },
+  "keywords": [
+    "ethereum",
+    "testing",
+    "unit",
+    "test",
+    "tdd",
+    "gulp"
+  ],
+  "author": "Ryan Casey <ryepdx@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ryepdx/gulp-ethertest/issues"
+  },
+  "homepage": "https://github.com/ryepdx/gulp-ethertest",
+  "dependencies": {
+    "through2": "^2.0.0"
+  }
+}
