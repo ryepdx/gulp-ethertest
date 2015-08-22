@@ -26,5 +26,11 @@
   "homepage": "https://github.com/ryepdx/gulp-ethertest",
   "dependencies": {
     "through2": "^2.0.0"
+  },
+  "devDependencies": {
+    "gulp": "^3.9.0",
+    "gulp-jshint": "^1.11.2",
+    "gulp-notify": "^2.2.0",
+    "jshint-stylish": "^2.0.1"
   }
 }
