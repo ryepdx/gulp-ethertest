@@ -155,7 +155,7 @@ module.exports = function (opts) {
         var logger = function (err, res) {
             var line;
             if (err) {
-                err = "ERROR: " + err;
+                err = "ERROR: " + err + "\n";
                 if (opts.colors) {
                     err = err.red;
                 }
@@ -179,7 +179,7 @@ module.exports = function (opts) {
         seenTxs = [];
         var assertWatch = contract.Assert().watch(function (err, res) {
             if (err) {
-                err = "ERROR: " + err;
+                err = "ERROR: " + err + "\n";
                 if (opts.colors) {
                     err = err.red;
                 }
