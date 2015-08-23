@@ -133,7 +133,7 @@ module.exports = function (opts) {
             var txReceipt = web3.eth.getTransactionReceipt(testTxHash);
             if (!txReceipt) continue;
 
-            var txBlock = web3.eth.getBlock(txReceipt.blockHash);
+            var txBlock = web3.eth.getBlock(txReceipt.blockNumber);
             if (txBlock.gasLimit <= txReceipt.cumulativeGasUsed) {
                 var output = "";
                 if (testTxs[testTxHash].logs.length > 0) {
