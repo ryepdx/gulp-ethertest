@@ -88,7 +88,9 @@ Modify it to your liking. (Changing the `primaryAccount` option is probably a go
 
 Test functions must start with either the word "should" or "test," and test contracts must end with the word "Test" and supply an "Assert" event that takes a boolean. Otherwise ethertest will assume you don't mean for it to be treated as a test and will skip it.
 
-Ethertest doesn't catch all the common failure modes just yet.
+Ethertest doesn't catch all the common failure modes just yet. In particular, geth will sometimes hold on to pending transactions and never actually mine them, which leads to Ethertest hanging.
+
+Only the first Assert event in your test function will get reported on. But let's be real here: you should really only be using [one assertion per test](http://www.artima.com/weblogs/viewpost.jsp?thread=35578) anyway. Even less intuitively, though, Ethertest will wait forever for an Assert event if it has decided your function is a test function and it doesn't ever trigger an Assert event. So there has to be a 1-to-1 relationship between your functions and Asserts. (It *will* detect if your transaction has run out of gas, though, so no worries there.)
 
 By default, test results are written to stdout. This can be overridden when ethertest is instantiated by setting the `outstream` option to a different stream object. All the options available and their default values are show below as a JSON object:
 
