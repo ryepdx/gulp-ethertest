@@ -15,6 +15,7 @@ module.exports = function (opts) {
     value: 0,
     rpcURL: 'http://localhost:8545',
     outstream: process.stdout,
+    watchLogEvents: true,
     colors: true
   }, opts || {});
 
@@ -170,14 +171,16 @@ module.exports = function (opts) {
         };
 
         var logWatchers = [];
-        _.each(['Log', 'LogBytes', 'LogStr', 'LogUint'], function (logEvent) {
-            if (!contract[logEvent]) return;
-            logWatchers.push(contract[logEvent]().watch(logger));
-        });
+        if (opts.watchLogEvents) {
+            _.each(['Log', 'LogBytes', 'LogStr', 'LogUint'], function (logEvent) {
+                if (!contract[logEvent]) return;
+                logWatchers.push(contract[logEvent]().watch(logger));
+            });
+        }
 
         var passes = 0;
         seenTxs = [];
-        var assertWatch = contract.Assert().watch(function (err, res) {
+        var assertWatch = contract.Assert({}, {fromBlock: 0}).watch(function (err, res) {
             if (err) {
                 err = "ERROR: " + err + "\n";
                 if (opts.colors) {
