@@ -258,6 +258,10 @@ RPCTester.prototype.watchAsserts = function () {
     if (_.intersection(txObj.contract.testTxs, that.testTxs.pending).length === 0) {
       that.write(txObj.contract.outputBuffer);
       txObj.contract.outputBuffer = "";
+
+      if (_.some(txObj.contract.abi, function (e) { return e.name === 'kill'; })) {
+        that.opts.web3.eth.contract(txObj.contract.abi).at(txObj.contract.address).kill();
+      }
     }
   });
 };
