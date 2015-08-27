@@ -178,11 +178,21 @@ RPCTester.prototype.watchLogs = function () {
   var that = this;
   if (!that.opts.watchLogEvents) return;
 
-  var logTopics = _.map([
-      'Log(string)', 'LogBytes(bytes32)',
-      'LogStr(string)', 'LogUint(uint256)',
-      'LogInt(int256)', 'LogBool(bool)'
-  ], function (signature) { return "0x" + web3.sha3(signature); });
+  var logTranslators = {
+    'LogBytes(bytes32)': function (data) { return data; },
+    'LogStr(string)': function (data) { return that.opts.web3.toAscii(data); },
+    'LogUint(uint256)': function (data) { return that.opts.web3.toBigNumber(data).toString(); },
+    'LogBool(bool)': function (data) { return Boolean(that.opts.web3.toDecimal(data)); }
+  }
+  logTranslators['LogInt(int256)'] = logTranslators['LogUint(256)'];
+  logTranslators['Log(string)'] = logTranslators['LogStr(string)'];
+
+  var logTopics = [];
+  for (signature in logTranslators) {
+    var hashedSig = "0x" + web3.sha3(signature);
+    logTopics.push(hashedSig);
+    logTranslators[hashedSig] = logTranslators[signature];
+  }
 
   var logger = function (err, res) {
     var line;
@@ -193,7 +203,7 @@ RPCTester.prototype.watchLogs = function () {
       }
       that.write(err);
     } else {
-      line = "LOG: " + res.args[0];
+      line = "LOG: " + logTranslators[res.topics[0]](res.data);
       if (that.opts.colors) {
           line = line.yellow;
       }
