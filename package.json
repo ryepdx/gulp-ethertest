@@ -1,6 +1,6 @@
 {
   "name": "gulp-ethertest",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Incorporate Ethereum test contracts into your Gulp workflow.",
   "main": "index.js",
   "scripts": {
