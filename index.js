@@ -1,12 +1,32 @@
-var _ = require('lodash');
+ var _ = require('lodash');
 var through = require('through2');
 var web3 = require('web3');
 var colors = require('colors');
 var gutil = require('gulp-util');
 var PluginError = gutil.PluginError;
 
-module.exports = function (opts) {
-  opts = _.extend({
+var RPCTester = function (opts, contracts) {
+  this.opts = [];
+  this.contracts = contracts;
+  this.skippedContracts = [];
+  this.logWatchers = [];
+
+  this.testTxs = {
+    pending: [],
+    failed: [],
+    passed: [],
+    deployed: [],
+    obj: {} 
+  };
+
+  this.contractTxs = {
+    pending: [],
+    completed: [],
+    failed: [],
+    obj: {}
+  };
+
+  this.opts = _.extend({
     web3: null,
     primaryAddress: null,
     gas: null,
@@ -19,34 +39,314 @@ module.exports = function (opts) {
     colors: true
   }, opts || {});
 
-  if (opts.web3 === null && !opts.rpcURL) {
+  if (this.opts.web3 === null && !this.opts.rpcURL) {
     new PluginError({
         plugin: 'Ethertest',
         message: 'You must supply either a web3 object or an rpcURL value!'
     });
   }
 
-  if (opts.web3 === null) {
-    opts.web3 = web3;
-    opts.web3.setProvider(new web3.providers.HttpProvider(opts.rpcURL));
+  if (this.opts.web3 === null) {
+    this.opts.web3 = web3;
+    this.opts.web3.setProvider(new web3.providers.HttpProvider(this.opts.rpcURL));
   }
 
-  if (!opts.web3.currentProvider) {
+  if (!this.opts.web3.currentProvider) {
     new PluginError({
         plugin: 'Ethertest',
         message: 'You must set an RPC provider for web3!'
     });
   }
-  opts.gasPrice = opts.gasPrice || opts.web3.eth.gasPrice;
+  this.opts.gasPrice = this.opts.gasPrice || this.opts.web3.eth.gasPrice;
 
-  if (opts.web3.eth.accounts.length === 0) {
+  if (this.opts.web3.eth.accounts.length === 0) {
     new PluginError({
         plugin: 'Ethertest',
         message: 'Need at least one account!'
     });
   }
-  opts.primaryAddress = opts.primaryAddress || opts.web3.eth.defaultAccount || opts.web3.eth.accounts[0];
+  this.opts.primaryAddress = this.opts.primaryAddress || this.opts.web3.eth.defaultAccount || this.opts.web3.eth.accounts[0];
+};
 
+
+RPCTester.prototype.completedContractTxsChange = function () {
+  if (this.contractTxs.pending.length === 0) return;
+
+  var completedTxs = [];
+
+  for (var i=0; i < this.contractTxs.pending.length; i+=1) {
+    var txHash = this.contractTxs.pending[i];
+    var receipt = this.opts.web3.eth.getTransactionReceipt(txHash);
+    if (!receipt || !receipt.blockHash) continue;
+    if (!receipt.contractAddress) {
+      that.emit('error', new PluginError({
+        plugin: 'Ethertest',
+        message: 'Failed to deploy ' + name + ' contract!'
+      }));
+      this.contractTxs.failed.push(txHash);
+
+    } else {
+      completedTxs.push(txHash);
+      this.contractTxs.completed.push(txHash);
+      this.contractTxs.obj[txHash].address = receipt.contractAddress;
+    }
+  }
+
+  this.contractTxs.pending = _.difference(this.contractTxs.pending, this.contractTxs.failed);
+  this.contractTxs.pending = _.difference(this.contractTxs.pending, this.contractTxs.completed);
+
+  return completedTxs;
+};
+
+
+RPCTester.prototype.checkTestTxs = function () {
+  if (this.testTxs.pending.length === 0) return;
+
+  for (var i=0; i < this.testTxs.pending.length; i+=1) {
+    var txHash = this.testTxs.pending[i];
+    var receipt = web3.eth.getTransactionReceipt(txHash);
+    if (!receipt || !receipt.blockHash) continue;
+
+    var txBlock = this.opts.web3.eth.getBlock(receipt.blockNumber);
+    if (txBlock.gasLimit <= receipt.cumulativeGasUsed) {
+      var output = "";
+
+      // Prepend any logging output.
+      if (this.testTxs.obj[txHash].logs.length > 0) {
+        output += _.pluck(_.sortBy(this.testTxs.obj[txHash].logs, "index"), "data").join("\n");
+      }
+      output += "FAIL (out of gas) - " + this.testTxs.obj[txHash].name + " (tx " + txHash + ") \n";
+
+      if (this.opts.colors) {
+        output = output.red;
+      }
+      this.testTxs.obj[txHash].contract.outputBuffer += output;
+      this.testTxs.failed.push(txHash);
+    } else {
+      this.testTxs.deployed.push(txHash);
+    }
+  }
+
+  this.testTxs.pending = _.difference(this.testTxs.pending, this.testTxs.failed);
+  this.testTxs.pending = _.difference(this.testTxs.pending, this.testTxs.deployed);
+};
+
+
+RPCTester.prototype.isFinished = function () {
+  if (this.contracts.length > (this.skippedContracts.length + this.contractTxs.completed.length) ||
+      this.testTxs.pending.length > 0 ||
+      this.testTxs.deployed.length > this.testTxs.passed.length + this.testTxs.failed.length) {
+    return false;
+  }
+  return true;
+};
+
+
+RPCTester.prototype.write = function (data) {
+  this.opts.outstream.write(data);
+};
+
+
+RPCTester.prototype.writeReport = function () {
+  var passString;
+  var numTests = (this.testTxs.passed.length + this.testTxs.failed.length);
+
+  if (this.testTxs.failed.length === 0) {
+      passString = "Passed " + this.testTxs.passed.length + " out of " + numTests + " tests\n";
+
+  } else {
+      passString = "Failed " + this.testTxs.failed.length + " out of " + numTests + " tests\n";
+  }
+  if (this.opts.colors) {
+      passString = (this.testTxs.failed.length === 0) ? passString.green : passString.red;
+  }
+
+  this.write("\n" + passString);
+};
+
+
+RPCTester.prototype.stopWatchers = function () {
+  this.blockWatcher.stopWatching();
+  this.assertWatch.stopWatching();
+  _.forEach(this.logWatchers, function (watcher) {
+      watcher.stopWatching();
+  });
+};
+
+
+RPCTester.prototype.watchLogs = function () {
+  var that = this;
+  if (!that.opts.watchLogEvents) return;
+
+  var logTopics = _.map([
+      'Log(string)', 'LogBytes(bytes32)',
+      'LogStr(string)', 'LogUint(uint256)',
+      'LogInt(int256)', 'LogBool(bool)'
+  ], function (signature) { return "0x" + web3.sha3(signature); });
+
+  var logger = function (err, res) {
+    var line;
+    if (err) {
+      err = "ERROR: " + err + "\n";
+      if (that.opts.colors) {
+          err = err.red;
+      }
+      that.write(err);
+    } else {
+      line = "LOG: " + res.args[0];
+      if (that.opts.colors) {
+          line = line.yellow;
+      }
+      that.testTxs.obj[res.transactionHash].logs.push({index: res.logIndex, data: line});
+    }
+  };
+
+  _.forEach(logTopics, function (topic) {
+    that.logWatchers.push(web3.eth.filter({fromBlock: 'latest', topics: [topic]}).watch(logger));
+  });
+};
+
+
+RPCTester.prototype.watchAsserts = function () {
+  var that = this;
+  that.assertWatch = web3.eth
+      .filter({fromBlock: 'latest', topics: ["0x"+web3.sha3("Assert(bool)")]})
+      .watch(function (err, res) {
+
+    if (err) {
+      err = "ERROR: " + err + "\n";
+      if (opts.colors) {
+        err = err.red;
+      }
+      that.write(err);
+      return;
+    }
+
+    if (_.includes(that.testTxs.failed, res.transactionHash) || _.includes(that.testTxs.passed, res.transactionHash)) {
+      return;
+    }
+
+    var testPassed = Boolean(that.opts.web3.toDecimal(res.data));
+    if (testPassed) {
+      that.testTxs.passed.push(res.transactionHash);
+
+    } else {
+      that.testTxs.failed.push(res.transactionHash);
+    }
+
+    var logOutput = "";
+    var txObj = that.testTxs.obj[res.transactionHash];
+    if (txObj.logs.length > 0) {
+      logOutput += _.pluck(_.sortBy(txObj.logs, "index"), "data").join("\n") + "\n";
+    }
+
+    var output;
+    if (testPassed) {
+      output = "PASS - " + txObj.name + "\n";
+    } else {
+      output = "FAIL - " + txObj.name + " (tx " + res.transactionHash + ") \n";
+    }
+
+    if (that.opts.colors) {
+      output = testPassed ? output.green : output.red;
+    }
+    txObj.contract.outputBuffer += (logOutput + output);
+
+    that.testTxs.pending = _.difference(that.testTxs.pending, that.testTxs.passed);
+    that.testTxs.pending = _.difference(that.testTxs.pending, that.testTxs.failed);
+
+    if (_.intersection(txObj.contract.testTxs, that.testTxs.pending).length === 0) {
+      that.write(txObj.contract.outputBuffer);
+      txObj.contract.outputBuffer = "";
+    }
+  });
+};
+
+
+RPCTester.prototype.watchBlocks = function () {
+  var that = this;
+  that.blockWatcher = that.opts.web3.eth.filter('latest', function () {
+    that.checkTestTxs();
+    
+    if (that.isFinished()) {
+      that.stopWatchers();
+      that.writeReport();
+      return;
+    }
+
+    var completedContracts = _.map(that.completedContractTxsChange(), function (txHash) {
+      return that.contractTxs.obj[txHash];
+    });
+
+    if (completedContracts.length > 0) {
+      that.createTestTxs(completedContracts);
+    }
+  });
+};
+
+
+RPCTester.prototype.createContractTxs = function () {
+  var that = this;
+
+  _.forEach(that.contracts, function (contract) {
+    contract.outputBuffer = "\n" + (that.opts.colors ? contract.name.bold : contract.name) + "\n";
+    contract.tests = _.map(_.filter(contract.abi, function (elem) {
+      return /^[t|T]est|^[s|S]hould/.test(elem.name);
+    }), function (elem) { return elem.name; });
+
+    if (contract.tests.length === 0) {
+      that.write("\n" + contract.name + "\n");
+      that.write('No test functions found, skipping!\n');
+      that.skippedContracts.push(contract.name);
+      return;
+    }
+
+    var tx = {
+      from: that.opts.primaryAddress, data: contract.bin,
+      gas: that.opts.gas, gasPrice: that.opts.gasPrice,
+      value: that.opts.endowment
+    };
+
+    var txHash = that.opts.web3.eth.sendTransaction(tx);
+    that.contractTxs.pending.push(txHash);
+    that.contractTxs.obj[txHash] = contract;
+  });
+};
+
+
+RPCTester.prototype.createTestTxs = function (contracts) {
+  var that = this;
+  
+  _.forEach(contracts, function (contract) {
+    contract.testTxs = [];
+    contractRPC = that.opts.web3.eth.contract(contract.abi).at(contract.address);
+
+    _.forEach(contract.tests, function (testName) {
+      var testString = testName.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').toLowerCase();
+      var txHash = contractRPC[testName]({
+        from: that.opts.primaryAddress, gas: that.opts.gas,
+        gasPrice: that.opts.gasPrice, value: that.opts.value
+      });
+      that.testTxs.pending.push(txHash);
+      that.testTxs.obj[txHash] = {
+        name: testString, logs: [], output: [], contract: contract
+      };
+      contract.testTxs.push(txHash);
+    });
+  });
+};
+
+
+RPCTester.prototype.runTests = function () {
+  this.watchLogs();
+  this.watchAsserts();
+  this.watchBlocks();
+  this.createContractTxs();
+};
+
+
+module.exports = function (opts) {
+  var tester;
   var contracts = {};
   var contractRegex = /\.bin$|\.abi$/;
   var bufferContracts = function (file, enc, callback) {
@@ -76,12 +376,13 @@ module.exports = function (opts) {
         }
       }
 
-      opts.outstream.write("ethertest: Loaded " + file.path + "\n");
-
       if (!(name in contracts)) {
-        contracts[name] = {};
+        contracts[name] = {name: name};
       }
       contracts[name][type] = data;
+
+      tester = new RPCTester(opts, _.values(contracts));
+      tester.write("ethertest: Loaded " + file.path + "\n");
       callback();
   };
 
@@ -90,186 +391,7 @@ module.exports = function (opts) {
       callback();
       return;
     }
-
-    var that = this;
-    var testTxs = {};
-    var suitesProcessed = 0;
-    var suitesRun = 0;
-    var suitesPassed = 0;
-    _.forOwn(contracts, function (contract, name) {
-      var testNames = _.map(_.filter(contracts[name].abi, function (elem) {
-        return /^[t|T]est|^[s|S]hould/.test(elem.name);
-      }), function (elem) { return elem.name; });
-
-      if (testNames.length === 0) {
-        suitesProcessed += 1;
-        opts.outstream.write("\n" + name + "\n");
-        opts.outstream.write('No test functions found, skipping!\n');
-        return;
-      }
-
-      var tx = {
-          from: opts.primaryAddress, data: contracts[name].bin,
-          gas: opts.gas, gasPrice: opts.gasPrice, value: opts.endowment
-      };
-
-      var TestContract = opts.web3.eth.contract(contracts[name].abi);
-      var txHash = opts.web3.eth.sendTransaction(tx);
-      var testsFinished = 0;
-      var outputBuffer = "\n" + (opts.colors ? name.bold : name) + "\n";
-
-      var blockWatch = opts.web3.eth.filter('latest', function () {
-        var receipt = opts.web3.eth.getTransactionReceipt(txHash);
-        if (!receipt || !receipt.blockHash) return;
-        if (!receipt.contractAddress) {
-          blockWatch.stopWatching();
-          that.emit('error', new PluginError({
-            plugin: 'Ethertest',
-            message: 'Failed to deploy ' + name + ' contract!'
-          }));
-        }
-
-        var outOfGasTxs = [];
-        for (testTxHash in testTxs) {
-            var txReceipt = web3.eth.getTransactionReceipt(testTxHash);
-            if (!txReceipt) continue;
-
-            var txBlock = web3.eth.getBlock(txReceipt.blockNumber);
-            if (txBlock.gasLimit <= txReceipt.cumulativeGasUsed) {
-                var output = "";
-                if (testTxs[testTxHash].logs.length > 0) {
-                    output += _.pluck(_.sortBy(testTxs[testTxHash].logs, "index"), "data").join("\n");
-                }
-                output += "FAIL (out of gas) - " + testTxs[testTxHash].name + " (tx " + testTxHash + ") \n";
-
-                if (opts.colors) {
-                    output = output.red;
-                }
-                outputBuffer += output;
-                testsFinished += 1;
-                outOfGasTxs.push(testTxHash);
-            }
-        }
-        testTxs = _.omit(testTxs, outOfGasTxs);
-
-        var contract = TestContract.at(receipt.contractAddress);
-        var logger = function (err, res) {
-            var line;
-            if (err) {
-                err = "ERROR: " + err + "\n";
-                if (opts.colors) {
-                    err = err.red;
-                }
-                opts.outstream.write(err);
-            } else {
-                line = "LOG: " + res.args.message;
-                if (opts.colors) {
-                    line = line.yellow;
-                }
-                testTxs[res.transactionHash].logs.push({index: res.logIndex, data: line});
-            }
-        };
-
-        var logWatchers = [];
-        if (opts.watchLogEvents) {
-            _.each(['Log', 'LogBytes', 'LogStr', 'LogUint'], function (logEvent) {
-                if (!contract[logEvent]) return;
-                logWatchers.push(contract[logEvent]().watch(logger));
-            });
-        }
-
-        var passes = 0;
-        seenTxs = [];
-        var assertWatch = contract.Assert({}, {fromBlock: 0}).watch(function (err, res) {
-            if (err) {
-                err = "ERROR: " + err + "\n";
-                if (opts.colors) {
-                    err = err.red;
-                }
-                opts.outstream.write(err);
-                return;
-            }
-            if (_.includes(seenTxs, res.transactionHash)) { return; }
-            seenTxs.push(res.transactionHash);
-
-            var testPassed = _.values(res.args)[0];
-
-            if (testPassed) {
-                passes += 1;
-            }
-            testsFinished += 1;
-
-            var logOutput = "";
-            if (testTxs[res.transactionHash].logs.length > 0) {
-                logOutput += _.pluck(_.sortBy(testTxs[res.transactionHash].logs, "index"), "data").join("\n") + "\n";
-            }
-
-            var output;
-            if (testPassed) {
-                output = "PASS - " + testTxs[res.transactionHash].name + "\n";
-            } else {
-                output = "FAIL - " + testTxs[res.transactionHash].name + " (tx " + testTxHash + ") \n"
-            }
-
-            if (opts.colors) {
-                output = testPassed ? output.green : output.red;
-            }
-            outputBuffer += (logOutput + output);
-
-            if (testsFinished === _.keys(testNames).length) {
-                assertWatch.stopWatching();
-                suitesProcessed += 1;
-                suitesRun += 1;
-                
-                var passString;
-                if (passes === testsFinished) {
-                    suitesPassed += 1;
-                    passString = "Passed " + passes + " out of " + testsFinished + " test cases\n";
-                } else {
-                    passString = "Failed " + (testsFinished - passes) + " out of " + testsFinished + " test cases\n";
-                }
-                if (opts.colors) {
-                    passString = (passes === testsFinished) ? passString.green : passString.red;
-                }
-                outputBuffer += passString;
-
-                if (suitesProcessed === _.keys(contracts).length) {
-                  var suitePassString;
-                  if (suitesPassed === suitesRun) {
-                    suitePassString= "\n" + suitesPassed + " out of " + suitesRun + " test contracts passed!\n";
-                  } else {
-                    suitePassString= "\n" + (suitesRun - suitesPassed) + " out of " + suitesRun + " test contracts failed!\n";
-                  }
-
-                  if (opts.colors) {
-                    suitePassString = (suitesPassed === suitesRun) ? suitePassString.bold.green : suitePassString.bold.red;
-                  }
-                  if (suitesProcessed > suitesRun) {
-                    suitePassString += "(Skipped " + (suitesProcessed - suitesRun) + " tests due to lack of test cases.)\n";
-                  }
-                  outputBuffer += suitePassString;
-                }
-                opts.outstream.write("\n" + outputBuffer)
-                outputBuffer = "";
-                assertWatch.stopWatching();
-                _.forEach(logWatchers, function (watcher) {
-                    watcher.stopWatching();
-                });
-                callback();
-            }
-            blockWatch.stopWatching();
-        });
-
-        _.forEach(testNames, function (testName) {
-          var result;
-          var testString = testName.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').toLowerCase();
-          var testTxHash = contract[testName]({
-            from: opts.primaryAddress, gas: opts.gas, gasPrice: opts.gasPrice, value: opts.value
-          });
-          testTxs[testTxHash] = {name: testString, logs: []};
-        });
-      });
-    });
+    tester.runTests();
   };
 
   return through.obj(bufferContracts, endStream);
