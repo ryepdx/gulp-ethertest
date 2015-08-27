@@ -1,7 +1,7 @@
 # gulp-ethertest
 
 ## What is it?
-A through-stream that collects compiled test contracts passed through it and runs them upon closing. Inspired by my desire to incorporate testing contracts into my Gulp workflow. That said, I'm a Gulp newbie and not really familiar with Javascript's streams concept yet, so I'm sure there are things that can be improved regarding my approach. Pull requests are always welcome. (And my apologies for the messy code.)
+A through-stream that collects compiled test contracts passed through it and runs them upon closing. Inspired by my desire to incorporate testing contracts into my Gulp workflow. That said, I'm a Gulp newbie and not really familiar with Javascript's streams concept yet, so I'm sure there are things that can be improved regarding my approach. Pull requests are always welcome.
 
 ## How do I install it?
 
